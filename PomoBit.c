@@ -49,6 +49,7 @@ void initialize_gpio() {
     gpio_set_dir(STATUS_LED_PIN, GPIO_OUT);
 }
 
+
 void update_status_led(absolute_time_t now) {
     if (current_state == STATE_STUDY) {
         gpio_put(STATUS_LED_PIN, 1);
@@ -60,6 +61,28 @@ void update_status_led(absolute_time_t now) {
             led_on = !led_on;
             gpio_put(STATUS_LED_PIN, led_on);
             last_led_toggle_time = now;
+}
+      
+void update_timer(absolute_time_t now, absolute_time_t* last_tick_time) {
+    if (!paused && (current_state == STATE_STUDY || current_state == STATE_REST)) {
+        // Verifica se passou um segundo desde a última atualização
+        if (absolute_time_diff_us(*last_tick_time, now) >= 1000000) {
+            if (remaining_time > 0) {
+                remaining_time--;
+            } else {
+                // Quando o timer chega a 0, inverte o estado e reinicia o tempo.
+                if (current_state == STATE_STUDY) {
+                    current_state = STATE_REST;
+                    remaining_time = REST_TIME;
+                } else { // STATE_REST
+                    current_state = STATE_STUDY;
+                    remaining_time = STUDY_TIME;
+                }
+                // Atualiza o estado anterior, pois estamos executando normalmente
+                previous_state = current_state;
+            }
+            // Atualiza o tempo do último tick para compensar possíveis atrasos.
+            *last_tick_time = now;
         }
     }
 }
