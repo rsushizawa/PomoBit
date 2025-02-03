@@ -40,9 +40,12 @@ add_executable(PomoBit PomoBit.c )
 pico_set_program_name(PomoBit "PomoBit")
 pico_set_program_version(PomoBit "0.1")
 
+# Generate PIO header
+pico_generate_pio_header(PomoBit ${CMAKE_CURRENT_LIST_DIR}/ws2818b.pio)
+
 # Modify the below lines to enable/disable output over UART/USB
 pico_enable_stdio_uart(PomoBit 0)
-pico_enable_stdio_usb(PomoBit 0)
+pico_enable_stdio_usb(PomoBit 1)
 
 # Add the standard library to the build
 target_link_libraries(PomoBit
@@ -55,7 +58,8 @@ target_include_directories(PomoBit PRIVATE
 
 # Add any user requested libraries
 target_link_libraries(PomoBit 
-        
+        hardware_pio
+        hardware_clocks
         )
 
 pico_add_extra_outputs(PomoBit)
