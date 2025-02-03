@@ -25,6 +25,12 @@ State previous_state = STATE_STUDY;  // Guarda o estado anterior para retomar ap
 int remaining_time = STUDY_TIME;
 bool paused = false;
 
+// Variáveis para debounce (armazenam o último estado lido dos botões)
+bool last_state_button_state = true; // true = não pressionado (pull-up ativo)
+bool last_state_button_pause = true;
+
+// Para controle do piscar do LED no estado PAUSED
+bool led_on = false;
 absolute_time_t last_led_toggle_time;
 
 void initialize_gpio() {
@@ -43,6 +49,20 @@ void initialize_gpio() {
     gpio_set_dir(STATUS_LED_PIN, GPIO_OUT);
 }
 
+
+void update_status_led(absolute_time_t now) {
+    if (current_state == STATE_STUDY) {
+        gpio_put(STATUS_LED_PIN, 1);
+    } else if (current_state == STATE_REST) {
+        gpio_put(STATUS_LED_PIN, 0);
+    } else if (current_state == STATE_PAUSED) {
+        // Se passaram 500ms desde a última troca, inverte o LED.
+        if (absolute_time_diff_us(last_led_toggle_time, now) >= 500 * 1000) {
+            led_on = !led_on;
+            gpio_put(STATUS_LED_PIN, led_on);
+            last_led_toggle_time = now;
+}
+      
 void update_timer(absolute_time_t now, absolute_time_t* last_tick_time) {
     if (!paused && (current_state == STATE_STUDY || current_state == STATE_REST)) {
         // Verifica se passou um segundo desde a última atualização
