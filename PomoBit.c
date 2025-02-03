@@ -4,6 +4,7 @@
 #include "hardware/timer.h"
 #include "hardware/pio.h"
 #include "hardware/clocks.h"
+#include <math.h>
 
 // Biblioteca gerada pelo arquivo .pio durante compilação.
 #include "ws2818b.pio.h"
@@ -18,8 +19,8 @@
 #define LED_PIN 7
 
 // Define time intervals (em segundos)
-#define STUDY_TIME (0.2 * 60)  // Ex.: 12 segundos para teste
-#define REST_TIME  (0.2 * 60)  // Ex.: 12 segundos para teste
+#define STUDY_TIME (25 * 60)  // Ex.: 12 segundos para teste
+#define REST_TIME  (5 * 60)  // Ex.: 12 segundos para teste
 
 // State machine states
 typedef enum {
@@ -129,6 +130,9 @@ void npWrite() {
   sleep_us(100); // Espera 100us, sinal de RESET do datasheet.
 }
 
+/**
+ * Indica o stado do progama no STATUS_LED_PIN
+ */
 void update_status_led(absolute_time_t now) {
     if (current_state == STATE_STUDY) {
         gpio_put(STATUS_LED_PIN, 1);
@@ -144,6 +148,9 @@ void update_status_led(absolute_time_t now) {
     }
 }
 
+/**
+ * Handler do tempo de cada estado
+ */
 void update_timer(absolute_time_t now, absolute_time_t* last_tick_time) {
     if (!paused && (current_state == STATE_STUDY || current_state == STATE_REST)) {
         // Verifica se passou um segundo desde a última atualização
@@ -168,6 +175,9 @@ void update_timer(absolute_time_t now, absolute_time_t* last_tick_time) {
     }
 }
 
+/**
+ * Processa o input dos botões
+ */
 void process_buttons() {
     // Lê os estados atuais (botões ativos em nível baixo)
     bool current_button_state = gpio_get(BUTTON_STATE_PIN);
@@ -210,6 +220,16 @@ void process_buttons() {
     last_state_button_pause = current_button_pause;
 }
 
+
+void led_matrix_visual(){
+    int leds_active = ceil(remaining_time / 60);
+    for(int i = 0; i < leds_active; i++){
+        npSetLED(i,255,255,255);
+    }
+    npWrite(); // Escreve os dados nos LEDs.
+    npClear();
+}
+
 int main()
 {
     stdio_init_all();
@@ -223,8 +243,6 @@ int main()
     absolute_time_t last_tick_time = get_absolute_time();
     last_led_toggle_time = get_absolute_time();
 
-    // Draw in LED matrix
-    npSetLED(24,255,255,0);
 
     npWrite(); // Escreve os dados nos LEDs.
     
@@ -241,14 +259,7 @@ int main()
         // Atualiza o LED de status de acordo com o estado
         update_status_led(now);
 
-        // Exibe o estado e o tempo restante (apenas para debug)
-        if (current_state == STATE_STUDY || current_state == STATE_REST) {
-            printf("State: %s, Time remaining: %d seconds\n",
-                   current_state == STATE_STUDY ? "Study" : "Rest",
-                   remaining_time);
-        } else {
-            printf("State: Paused, Time remaining: %d seconds\n", remaining_time);
-        }
+        led_matrix_visual();
 
         // Pequena espera para evitar uso excessivo da CPU (10 ms)
         sleep_ms(10);
