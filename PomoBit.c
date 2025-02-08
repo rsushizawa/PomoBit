@@ -95,9 +95,66 @@ typedef pixel_t npLED_t; // Mudança de nome de "struct pixel_t" para "npLED_t" 
 // Declaração do buffer de pixels que formam a matriz.
 npLED_t leds[LED_COUNT];
 
-// Variáveis para uso da máquina PIO.
+// Variáveis para uso da máquina 'PIO.
 PIO np_pio;
 uint sm;
+
+/**
+ * Inicializa a máquina PIO para controle da matriz de LEDs.
+ */
+void npInit(uint pin) {
+
+    // Cria programa PIO.
+    uint offset = pio_add_program(pio0, &ws2818b_program);
+    np_pio = pio0;
+
+    // Toma posse de uma máquina PIO.
+    sm = pio_claim_unused_sm(np_pio, false);
+    if (sm < 0) {
+        np_pio = pio1;
+        sm = pio_claim_unused_sm(np_pio, true); // Se nenhuma máquina estiver livre, panic!
+    }
+
+    // Inicia programa na máquina PIO obtida.
+    ws2818b_program_init(np_pio, sm, offset, pin, 800000.f);
+
+    // Limpa buffer de pixels.
+    for (uint i = 0; i < LED_COUNT; ++i) {
+        leds[i].R = 0;
+        leds[i].G = 0;
+        leds[i].B = 0;
+    }
+}
+  
+/**
+ * Atribui uma cor RGB a um LED.
+ */
+void npSetLED(const uint index, const uint8_t r, const uint8_t g, const uint8_t b) {
+    leds[index].R = r;
+    leds[index].G = g;
+    leds[index].B = b;
+}
+  
+/**
+ * Limpa o buffer de pixels.
+ */
+void npClear() {
+    for (uint i = 0; i < LED_COUNT; ++i)
+        npSetLED(i, 0, 0, 0);
+}
+  
+/**
+ * Escreve os dados do buffer nos LEDs.
+ */
+void npWrite() {
+    // Escreve cada dado de 8-bits dos pixels em sequência no buffer da máquina PIO.
+    for (uint i = 0; i < LED_COUNT; ++i) {
+        pio_sm_put_blocking(np_pio, sm, leds[i].G);
+        pio_sm_put_blocking(np_pio, sm, leds[i].R);
+        pio_sm_put_blocking(np_pio, sm, leds[i].B);
+    }
+sleep_us(100); // Espera 100us, sinal de RESET do datasheet.
+}
 
 /**
  * FUNÇÕES DE INICIALIZAÇÃO
@@ -300,64 +357,11 @@ void update_joystick_config() {
 }
 
 /**
- * Inicializa a máquina PIO para controle da matriz de LEDs.
+ * Liga 1 led para cada minuto 0 a 25
  */
-void npInit(uint pin) {
-
-    // Cria programa PIO.
-    uint offset = pio_add_program(pio0, &ws2818b_program);
-    np_pio = pio0;
-
-    // Toma posse de uma máquina PIO.
-    sm = pio_claim_unused_sm(np_pio, false);
-    if (sm < 0) {
-        np_pio = pio1;
-        sm = pio_claim_unused_sm(np_pio, true); // Se nenhuma máquina estiver livre, panic!
-    }
-
-    // Inicia programa na máquina PIO obtida.
-    ws2818b_program_init(np_pio, sm, offset, pin, 800000.f);
-
-    // Limpa buffer de pixels.
-    for (uint i = 0; i < LED_COUNT; ++i) {
-        leds[i].R = 0;
-        leds[i].G = 0;
-        leds[i].B = 0;
-    }
-}
-  
-/**
- * Atribui uma cor RGB a um LED.
- */
-void npSetLED(const uint index, const uint8_t r, const uint8_t g, const uint8_t b) {
-    leds[index].R = r;
-    leds[index].G = g;
-    leds[index].B = b;
-}
-  
-/**
- * Limpa o buffer de pixels.
- */
-void npClear() {
-    for (uint i = 0; i < LED_COUNT; ++i)
-        npSetLED(i, 0, 0, 0);
-}
-  
-/**
- * Escreve os dados do buffer nos LEDs.
- */
-void npWrite() {
-    // Escreve cada dado de 8-bits dos pixels em sequência no buffer da máquina PIO.
-    for (uint i = 0; i < LED_COUNT; ++i) {
-        pio_sm_put_blocking(np_pio, sm, leds[i].G);
-        pio_sm_put_blocking(np_pio, sm, leds[i].R);
-        pio_sm_put_blocking(np_pio, sm, leds[i].B);
-    }
-sleep_us(100); // Espera 100us, sinal de RESET do datasheet.
-}
-
-void led_matrix_visual(int minutes, int r, int g, int b){
-    int leds_active = ceil(minutes / 60);
+void led_matrix_visual(int seconds, int r, int g, int b){
+    float seconds_leds = seconds;
+    int leds_active = ceil(seconds_leds / 60);
     for(int i = 0; i < leds_active; i++){
         npSetLED(i,r,g,b);
     }
@@ -365,14 +369,17 @@ void led_matrix_visual(int minutes, int r, int g, int b){
     npClear();
 }
 
+/**
+ * No mode de configuração atualiza os leds conforme o usuário muda os timers
+ */
 void update_matriz_config() {
     if (current_state == STATE_CONFIG){
         if (previous_state == STATE_STUDY){
-            led_matrix_visual(study_duration, 0, 255, 0);
+            led_matrix_visual(study_duration, 0, 64, 0);
         }
         else {
             if (previous_state == STATE_REST){
-                led_matrix_visual(rest_duration, 0, 0, 255);
+                led_matrix_visual(rest_duration, 0, 0, 64);
             }
         }
     }
@@ -408,7 +415,7 @@ int main() {
             process_buttons();
             update_timer(now, &last_tick_time);
             update_status_led(now);
-            led_matrix_visual(remaining_time, 255, 255, 255);
+            led_matrix_visual(remaining_time, 64, 64, 64);
         }
         
         sleep_ms(100);
