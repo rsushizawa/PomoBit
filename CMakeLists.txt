@@ -35,7 +35,7 @@ pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(PomoBit PomoBit.c )
+add_executable(PomoBit PomoBit.c)
 
 pico_set_program_name(PomoBit "PomoBit")
 pico_set_program_version(PomoBit "0.1")
@@ -56,10 +56,13 @@ target_include_directories(PomoBit PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
 )
 
+
 # Add any user requested libraries
 target_link_libraries(PomoBit 
         hardware_pio
         hardware_clocks
+        hardware_adc
+        hardware_i2c
         )
 
 pico_add_extra_outputs(PomoBit)
