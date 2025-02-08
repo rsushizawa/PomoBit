@@ -35,7 +35,7 @@ pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(PomoBit PomoBit.c ssd1306_i2c.c)
+add_executable(PomoBit PomoBit.c)
 
 pico_set_program_name(PomoBit "PomoBit")
 pico_set_program_version(PomoBit "0.1")
