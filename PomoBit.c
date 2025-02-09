@@ -8,6 +8,7 @@
 #include "hardware/timer.h"
 #include "hardware/adc.h"
 #include "hardware/clocks.h"
+#include "hardware/pwm.h"
 #include <math.h>
 
 // Biblioteca gerada pelo arquivo .pio durante compilação.
@@ -32,6 +33,20 @@ const uint I2C_SCL = 15;
 // Intervalos mínimos e máximos (em minutos) para estudo/pausa
 #define MIN_TIME_MINUTES 5
 #define MAX_TIME_MINUTES 25
+
+// Define os pinos para o buzzer estéreo
+#define BUZZER_LEFT_PIN  10
+#define BUZZER_RIGHT_PIN 21
+
+// Definições de notas musicais (frequências aproximadas em Hz)
+#define NOTE_C4  262
+#define NOTE_D4  294
+#define NOTE_E4  330
+#define NOTE_F4  349
+#define NOTE_G4  392
+#define NOTE_A4  440
+#define NOTE_B4  494
+#define NOTE_C5  523
 
 /**
  * DEFINIÇÃO DOS ESTADOS
@@ -157,6 +172,55 @@ sleep_us(100); // Espera 100us, sinal de RESET do datasheet.
 }
 
 /**
+ * Função: play_tone
+ * -----------------
+ * Configura o PWM para gerar um tom de frequência 'frequency' durante
+ * 'duration_ms' milissegundos, emitindo o sinal em ambos os pinos do buzzer.
+ */
+void play_tone(uint frequency, uint duration_ms) {
+    // Escolhemos um divisor fixo para o PWM.
+    // O cálculo da frequência é: frequency = 125e6 / (divider * (wrap+1))
+    const float divider = 64.0f;
+
+    // Como os dois pinos pertencem ao mesmo slice, usamos um deles para obter o número do slice.
+    uint slice_num = pwm_gpio_to_slice_num(BUZZER_LEFT_PIN);
+
+    // Calcula o valor de wrap para gerar a frequência desejada.
+    // (wrap + 1) = 125e6 / (divider * frequency)
+    uint32_t wrap = (uint32_t)(125000000 / (divider * frequency)) - 1;
+
+    // Configura o divisor e o wrap do slice
+    pwm_set_clkdiv(slice_num, divider);
+    pwm_set_wrap(slice_num, wrap);
+
+    // Configura os duty cycles para 50% (metade do valor de wrap) em ambos os canais,
+    // gerando uma onda quadrada (tom puro)
+    pwm_set_gpio_level(BUZZER_LEFT_PIN, wrap / 8);
+    pwm_set_gpio_level(BUZZER_RIGHT_PIN, wrap / 8);
+
+    // Ativa o PWM para iniciar o som
+    pwm_set_enabled(slice_num, true);
+
+    // Mantém o tom ativo pelo tempo desejado
+    sleep_ms(duration_ms);
+
+    // Desativa o PWM para silenciar o buzzer
+    pwm_set_enabled(slice_num, false);
+
+    // Pequena pausa entre os tons
+    sleep_ms(50);
+}
+
+/**
+ * FUNÇÃO de TOCAR UMA SEQUENCIA DE FREQUENCIAS/NOTAS
+ */
+void play_sound(int* melody, int* noteDurations, int n){
+    for (int i = 0; i < n; i++) {
+        play_tone(melody[i], noteDurations[i]);
+    }
+}
+
+/**
  * FUNÇÕES DE INICIALIZAÇÃO
  */
 void initialize_gpio() {
@@ -185,6 +249,11 @@ void initialize_gpio() {
     // Joystick: eixo analógico
     adc_init();
     adc_gpio_init(JOYSTICK_ADC_PIN); // Configura o pino ADC para o joystick
+
+    // Configura os pinos do buzzer para a função PWM
+    gpio_set_function(BUZZER_LEFT_PIN, GPIO_FUNC_PWM);
+    gpio_set_function(BUZZER_RIGHT_PIN, GPIO_FUNC_PWM);
+
 }
 
 /**
@@ -278,6 +347,9 @@ void update_timer(absolute_time_t now, absolute_time_t* last_tick_time) {
  */
 void process_joystick_button() {
     bool current_jsw = gpio_get(JOYSTICK_SWITCH_PIN);
+    int configMelody[] = { NOTE_C4, NOTE_E4, NOTE_G4, NOTE_E4 };
+    int configNoteDurations[] = {150, 150, 150, 150};
+    int configNotes = sizeof(configMelody) / sizeof(configMelody[0]);
 
     // Detecta borda de descida: botão acabou de ser pressionado
     if (last_joystick_switch_state && !current_jsw) {
@@ -290,17 +362,19 @@ void process_joystick_button() {
         if (!joystick_long_press_handled) {
             if (absolute_time_diff_us(joystick_switch_press_time, get_absolute_time()) > 2000000) {
                 // Pressão longa detectada (2 s)
-                gpio_put(CONFIG_LED_PIN, 0);
                 joystick_long_press_handled = true;
                 if (current_state == STATE_CONFIG) {
                     // Se já estiver em modo de configuração, sai dele (o timer fica pausado)
                     current_state = previous_state;
+                    gpio_put(CONFIG_LED_PIN, 0);
+                    play_sound(configMelody, configNoteDurations,configNotes);
                 } else {
                     // Se não estiver, entra no modo de configuração
                     previous_state = current_state;
                     current_state = STATE_CONFIG;
                     gpio_put(CONFIG_LED_PIN, 1);
                     gpio_put(STATUS_LED_PIN, 0);
+                    play_sound(configMelody, configNoteDurations,configNotes);
                     // Ao entrar em CONFIG, é interessante pausar o timer para facilitar o ajuste:
                     // (aqui, você pode armazenar o tempo atual, se desejar)
                 }
@@ -319,6 +393,7 @@ void process_joystick_button() {
     last_joystick_switch_state = current_jsw;
 }
 
+
 /**
  * ATUALIZA A CONFIGURAÇÃO USANDO O JOYSTICK (modo CONFIG)
  * Lê o ADC e mapeia para o intervalo [MIN_TIME_MINUTES, MAX_TIME_MINUTES]
@@ -328,14 +403,19 @@ void update_joystick_config() {
     // Seleciona o canal correspondente (assumindo que JOYSTICK_ADC_PIN é ADC0)
     adc_select_input(0);
     uint adc_y_raw = adc_read();
+    int configMelody[] = { NOTE_C4, NOTE_G4};
+    int configNoteDurations[] = {100, 100};
+    int configNotes = sizeof(configMelody) / sizeof(configMelody[0]);
     
     if (previous_state == STATE_STUDY) {
         if (adc_y_raw <= 150 && study_time_minutes > MIN_TIME_MINUTES){
             study_time_minutes--;
+            play_sound(configMelody, configNoteDurations,configNotes);
         }
         else{
             if (adc_y_raw >= 4000 && study_time_minutes < MAX_TIME_MINUTES){
                 study_time_minutes++;
+                play_sound(configMelody, configNoteDurations,configNotes);
             }
         }
         study_duration = study_time_minutes * 60;
@@ -344,10 +424,12 @@ void update_joystick_config() {
         if (previous_state == STATE_REST){
             if (adc_y_raw <= 150 && rest_time_minutes > MIN_TIME_MINUTES){
                 rest_time_minutes--;
+                play_sound(configMelody, configNoteDurations,configNotes);
             }
             else{
                 if (adc_y_raw >= 4000 && rest_time_minutes < MAX_TIME_MINUTES){
                     rest_time_minutes++;
+                    play_sound(configMelody, configNoteDurations,configNotes);
                 }
             }
             rest_duration = rest_time_minutes * 60;
@@ -357,7 +439,7 @@ void update_joystick_config() {
 }
 
 /**
- * Liga 1 led para cada minuto 0 a 25
+ * LIGA 1 LED PARA CADA MINUTO 0 A 25
  */
 void led_matrix_visual(int seconds, int r, int g, int b){
     float seconds_leds = seconds;
@@ -370,7 +452,7 @@ void led_matrix_visual(int seconds, int r, int g, int b){
 }
 
 /**
- * No mode de configuração atualiza os leds conforme o usuário muda os timers
+ * NO MODO DE CONFIGURAÇÃO ATUALIZA OS TIMERS
  */
 void update_matriz_config() {
     if (current_state == STATE_CONFIG){
@@ -399,6 +481,11 @@ int main() {
     remaining_time = study_duration;  // Começa em Study
     last_tick_time = get_absolute_time();
     last_led_toggle_time = get_absolute_time();
+    
+    int startUpMelody[] = { NOTE_C4, NOTE_E4, NOTE_G4, NOTE_C5 };
+    int startUpNoteDurations[] = { 200, 200, 200, 400 };
+    int startUpNotes = sizeof(startUpMelody) / sizeof(startUpMelody[0]);
+    play_sound(startUpMelody, startUpNoteDurations, startUpNotes);
 
     while (true) {
         absolute_time_t now = get_absolute_time();
