@@ -63,7 +63,6 @@ target_link_libraries(PomoBit
         hardware_clocks
         hardware_adc
         hardware_i2c
-        hardware_pwm
         )
 
 pico_add_extra_outputs(PomoBit)
