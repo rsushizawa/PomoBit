@@ -18,20 +18,17 @@
  */
 #define BUTTON_STATE_PIN    5   // Botão para trocar entre study/rest
 #define BUTTON_PAUSE_PIN    6  // Botão para pausar o timer
-#define STATUS_LED_PIN      13   // LED de status
+#define STUDY_LED_PIN      11   // LED de status
+#define REST_LED_PIN      13   // LED de status
 #define CONFIG_LED_PIN      12   // config status
 
 // Pinos do joystick:
 #define JOYSTICK_ADC_PIN    26   // Usaremos este pino para o eixo (ex.: eixo vertical)
 #define JOYSTICK_SWITCH_PIN 22   // Botão (switch) do joystick
 
-// Pinos OLED:
-const uint I2C_SDA = 14;
-const uint I2C_SCL = 15;
-
 // Intervalos mínimos e máximos (em minutos) para estudo/pausa
-#define MIN_TIME_MINUTES 5
-#define MAX_TIME_MINUTES 25
+#define MIN_TIME_MINUTES 1
+#define MAX_TIME_MINUTES 50
 
 /**
  * DEFINIÇÃO DOS ESTADOS
@@ -169,9 +166,13 @@ void initialize_gpio() {
     gpio_set_dir(BUTTON_PAUSE_PIN, GPIO_IN);
     gpio_pull_up(BUTTON_PAUSE_PIN);
     
-    // LED de status:
-    gpio_init(STATUS_LED_PIN);
-    gpio_set_dir(STATUS_LED_PIN, GPIO_OUT);
+    // LED STUDY:
+    gpio_init(STUDY_LED_PIN);
+    gpio_set_dir(STUDY_LED_PIN, GPIO_OUT);
+
+    // LED RES:
+    gpio_init(REST_LED_PIN);
+    gpio_set_dir(REST_LED_PIN, GPIO_OUT);
 
     // LED de config:
     gpio_init(CONFIG_LED_PIN);
@@ -191,19 +192,38 @@ void initialize_gpio() {
  * ATUALIZAÇÃO DO LED DE STATUS
  */
 void update_status_led(absolute_time_t now) {
-    if (current_state == STATE_STUDY) {
-        gpio_put(STATUS_LED_PIN, 1);
-    } else if (current_state == STATE_REST) {
-        gpio_put(STATUS_LED_PIN, 0);
-    } else if (current_state == STATE_PAUSED) {
+    if (current_state == STATE_PAUSED) {
         // Pisca a cada 500 ms
         if (absolute_time_diff_us(last_led_toggle_time, now) >= 500 * 1000) {
             led_on = !led_on;
-            gpio_put(STATUS_LED_PIN, led_on);
+            if (previous_state == STATE_REST){
+                gpio_put(REST_LED_PIN, led_on);
+            } else {
+                if (previous_state == STATE_STUDY){
+                    gpio_put(STUDY_LED_PIN, led_on);
+                }
+            }
             last_led_toggle_time = now;
         }
     }
     // Em STATE_CONFIG, o LED pode permanecer como estava ou ter outro padrão (opcional)
+}
+
+/**
+ * Pisca a matriz de led
+ * Usada para alertar o termino do periodo de estudo e descanso
+ */
+void flash_led_matrix(int nTimes,int delay_ms, int nLeds, int r, int g, int b){
+    for (int i = 0; i < nTimes; i++) {
+        for (int j = 0; j < LED_COUNT; j++) {
+            npSetLED(j, r, g, b);
+        }
+        npWrite();
+        sleep_ms(delay_ms);
+        npClear();
+        npWrite();
+        sleep_ms(delay_ms);
+    }
 }
 
 /**
@@ -259,13 +279,30 @@ void update_timer(absolute_time_t now, absolute_time_t* last_tick_time) {
             } else {
                 // Quando chega a 0, troca de estado e reinicia o tempo
                 if (current_state == STATE_STUDY) {
+                    bool current_button_state = gpio_get(BUTTON_STATE_PIN);
+                    while (current_button_state)
+                    {
+                        flash_led_matrix(1,200,25,64,64,0);
+                        current_button_state = gpio_get(BUTTON_STATE_PIN);
+                    }
+                    npClear();
+                    previous_state = current_state;
                     current_state = STATE_REST;
                     remaining_time = rest_duration;
+                    sleep_ms(200);
                 } else { // STATE_REST
+                    bool current_button_state = gpio_get(BUTTON_STATE_PIN);
+                    while (current_button_state)
+                    {
+                        flash_led_matrix(1,200,25,32,32,32);
+                        current_button_state = gpio_get(BUTTON_STATE_PIN);
+                    }
+                    npClear();
+                    previous_state = current_state;
                     current_state = STATE_STUDY;
                     remaining_time = study_duration;
+                    sleep_ms(200);
                 }
-                previous_state = current_state;
             }
             *last_tick_time = now;
         }
@@ -273,7 +310,7 @@ void update_timer(absolute_time_t now, absolute_time_t* last_tick_time) {
 }
 
 /**
- * PROCESSA O SWITCH DO JOYSTICK
+ * PROCESSA O SWITCH DO JOYSTICKs
  * Trata pressão curta e longa para entrar/ sair do modo CONFIG ou trocar o parâmetro a ser editado
  */
 void process_joystick_button() {
@@ -296,11 +333,16 @@ void process_joystick_button() {
                     // Se já estiver em modo de configuração, sai dele (o timer fica pausado)
                     current_state = previous_state;
                 } else {
-                    // Se não estiver, entra no modo de configuração
-                    previous_state = current_state;
-                    current_state = STATE_CONFIG;
+                    if (current_state == STATE_PAUSED){
+                        current_state == STATE_CONFIG;
+                    } else{
+                        // Se não estiver, entra no modo de configuração
+                        previous_state = current_state;
+                        current_state = STATE_CONFIG;
+                    }
                     gpio_put(CONFIG_LED_PIN, 1);
-                    gpio_put(STATUS_LED_PIN, 0);
+                    gpio_put(STUDY_LED_PIN, 0);
+                    gpio_put(REST_LED_PIN, 0);
                     // Ao entrar em CONFIG, é interessante pausar o timer para facilitar o ajuste:
                     // (aqui, você pode armazenar o tempo atual, se desejar)
                 }
@@ -357,14 +399,27 @@ void update_joystick_config() {
 }
 
 /**
- * Liga 1 led para cada minuto 0 a 25
+ * Liga 1 led para cada minuto 0 a 50
  */
 void led_matrix_visual(int seconds, int r, int g, int b){
     float seconds_leds = seconds;
     int leds_active = ceil(seconds_leds / 60);
-    for(int i = 0; i < leds_active; i++){
-        npSetLED(i,r,g,b);
+
+    if (leds_active > 25){
+        for(int i = 0; i < 25; i++){
+            npSetLED(i,r,g,b);
+        }
+        b += 16;
+        for(int i = 0; i < leds_active-25; i++){
+            npSetLED(i,r,g,b);
+        }
+
+    } else {
+        for(int i = 0; i < leds_active; i++){
+            npSetLED(i,r,g,b);
+        }
     }
+
     npWrite(); // Escreve os dados nos LEDs.
     npClear();
 }
@@ -375,11 +430,11 @@ void led_matrix_visual(int seconds, int r, int g, int b){
 void update_matriz_config() {
     if (current_state == STATE_CONFIG){
         if (previous_state == STATE_STUDY){
-            led_matrix_visual(study_duration, 0, 64, 0);
+            led_matrix_visual(study_duration, 0, 16, 0);
         }
         else {
             if (previous_state == STATE_REST){
-                led_matrix_visual(rest_duration, 0, 0, 64);
+                led_matrix_visual(rest_duration, 16, 0, 0);
             }
         }
     }
@@ -411,11 +466,18 @@ int main() {
             update_matriz_config();
             sleep_ms(100);
         } else {
+
+            
             // Modo normal: processa botões físicos, timer e LED
             process_buttons();
             update_timer(now, &last_tick_time);
             update_status_led(now);
-            led_matrix_visual(remaining_time, 64, 64, 64);
+            if (current_state == STATE_STUDY){
+                led_matrix_visual(remaining_time, 0, 16, 0);
+            } else if(current_state == STATE_REST){
+                led_matrix_visual(remaining_time, 16, 0, 0);
+            }
+
         }
         
         sleep_ms(100);
